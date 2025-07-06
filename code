@@ -1,0 +1,70 @@
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+from pytrends.request import TrendReq
+from prophet import Prophet
+from sklearn.ensemble import IsolationForest
+
+pytrends = TrendReq(hl='en-US', tz=360)
+
+
+kw_list = ["python", "ai", "machine learning"]
+pytrends.build_payload(kw_list, cat=0, timeframe='today 12-m', geo='', gprop='')
+
+
+df = pytrends.interest_over_time()
+df = df.drop(columns=['isPartial'])
+df.head()
+plt.figure(figsize=(12,6))
+for col in df.columns:
+    plt.plot(df.index, df[col], label=col)
+plt.title("Google Search Trends")
+plt.xlabel("Date")
+plt.ylabel("Search Interest")
+plt.legend()
+plt.grid()
+plt.show()
+query = 'python'
+data = df[[query]].copy()
+
+
+model = IsolationForest(contamination=0.05)
+data['anomaly'] = model.fit_predict(data[[query]])
+
+
+anomalies = data[data['anomaly'] == -1]
+
+
+plt.figure(figsize=(12,6))
+plt.plot(data.index, data[query], label='Search Interest')
+plt.scatter(anomalies.index, anomalies[query], color='red', label='Anomaly')
+plt.title(f"Anomaly Detection in '{query}' Searches")
+plt.legend()
+plt.show()
+df_prophet = df.reset_index()[['date', 'python']]
+df_prophet.columns = ['ds', 'y']
+
+model = Prophet()
+model.fit(df_prophet)
+
+future = model.make_future_dataframe(periods=30)
+forecast = model.predict(future)
+
+model.plot(forecast)
+plt.title("Forecast with Prophet")
+plt.show()
+merged = pd.merge(df_prophet, forecast[['ds', 'yhat_lower', 'yhat_upper']], on='ds', how='left')
+merged['anomaly'] = ((merged['y'] < merged['yhat_lower']) | (merged['y'] > merged['yhat_upper']))
+
+plt.figure(figsize=(12,6))
+plt.plot(merged['ds'], merged['y'], label='Actual')
+plt.fill_between(merged['ds'], merged['yhat_lower'], merged['yhat_upper'], color='gray', alpha=0.2, label='Forecast Range')
+plt.scatter(merged[merged['anomaly']]['ds'], merged[merged['anomaly']]['y'], color='red', label='Anomaly')
+plt.legend()
+plt.title("Prophet-based Anomaly Detection")
+plt.show()
+anomalies.to_csv("detected_anomalies.csv")
+from google.colab import files
+files.download("detected_anomalies.csv")
